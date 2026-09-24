@@ -35,10 +35,11 @@ Almost all linters in `ament_lint` **already** have prebuilt platform wheels (`m
 | **`pep257`** | `pydocstyle`, `snowballstemmer` | Pure-Python (`py3-none-any.whl`) |
 | **`mypy`** | `mypy` | Prebuilt `mypyc` binary wheels |
 
-We only need to publish **3 packages to PyPI**:
-1. **`uncrustify-wheel`**: Prebuilt binary wheel (`cibuildwheel` + `scikit-build-core`) bundling `uncrustify 0.78.1` for `linux-amd64`, `linux-arm64`, `osx-arm64`, `osx-amd64`, and `windows-amd64`.
-2. **`cppcheck-wheel`**: Prebuilt binary wheel (`cibuildwheel` + `scikit-build-core`) bundling `cppcheck 2.14.0` for the same 5 targets.
-3. **`manylint`**: Pure-Python package on PyPI that pins exact `==` versions of `pre-commit`, `uncrustify-wheel`, `cppcheck-wheel`, `lxml`, `clang-format`, `flake8` (+ 7 plugins), and `pydocstyle`, while bundling `ament_lint`'s default configs (`ament_code_style_0_78.cfg`, `ament_flake8.ini`, `.clang-format`, `package_format2/3.xsd`) and `default_pre_commit_config.yaml`.
+We publish **`manylint`** and the **`ros-code-standard-<linter>`** packages to PyPI:
+1. **`ros-code-standard-uncrustify`**: Prebuilt binary wheel (`hatchling` + `hatch_build.py`) bundling `uncrustify 0.78.1` + `ament_code_style_0_78.cfg` for `linux-amd64`, `linux-arm64`, `osx-arm64`, `osx-amd64`, and `windows-amd64`.
+2. **`ros-code-standard-cppcheck`**: Prebuilt binary wheel (`hatchling` + `hatch_build.py`) bundling `cppcheck 2.14.0` + `std.cfg` for the same 5 targets.
+3. **`ros-code-standard-{xmllint,cpplint,lint-cmake,copyright,flake8,pep257}`**: Pure-Python wheels (`*-py3-none-any.whl`) bundling the ROS 2 linter rules, schemas (`package_format2/3.xsd`), and default configs (`ament_flake8.ini`).
+4. **`manylint`**: Top-level pure-Python CLI package on PyPI that pins exact `==` versions of `pre-commit` and all `ros-code-standard-*` packages, while bundling `default_pre_commit_config.yaml`.
 
 ---
 

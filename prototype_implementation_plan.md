@@ -229,3 +229,47 @@ Once all subagents complete their `manylint_*` packages, the Main Agent integrat
 4. **End-to-End Verification**:
    * Run `manylint /workspaces/ros2/src/ament/ament_lint/ament_lint_auto` in `--output=text` and `--output=junit` modes.
    * Verify that formatting divergences are fixed in-place and reported in JUnit XML, and that clean packages exit with `0`.
+
+---
+
+## 6. Multi-OS / Multi-Architecture Support & Release Process
+
+### A. Which Packages Need Multi-Platform Wheel Builds?
+
+Not all packages need to be built on multiple platforms:
+
+1. **7 Pure-Python Universal Packages (`*-py3-none-any.whl`) — Built Once**:
+   * `manylint`, `manylint_cpplint`, `manylint_lint_cmake`, `manylint_copyright`, `manylint_flake8`, `manylint_pep257`, and `manylint_xmllint` (when using `lxml`, which already publishes its own binary wheels on PyPI for every OS/arch).
+   * These contain only Python files and static config/schema files (`.cfg`, `.ini`, `.xsd`).
+   * You build them **once** on a single Linux runner (`hatch build -t wheel`), and the resulting `*-py3-none-any.whl` works on every OS (`Linux`, `macOS`, `Windows`), every CPU architecture (`amd64`, `arm64`), and every Python 3 version (`3.10+`).
+
+2. **2 Native Binary Packages (`*-py3-none-<platform>.whl`) — Built per OS/Arch (NOT per Python version!)**:
+   * `manylint_uncrustify` and `manylint_cppcheck` bundle compiled C++ executables (`bin/uncrustify` and `bin/cppcheck`).
+   * Because they bundle standalone executables (and do **not** link against `libpython` or the CPython C API), `hatch_build.py` sets the wheel tag to `py3-none-<platform_tag>` (for example, `manylint_uncrustify-0.1.0-py3-none-manylinux_2_17_x86_64.whl`).
+   * This means you only build **5 wheels total per binary package** (1 per OS/arch target), rather than multiplying by every Python version (`cp310`, `cp311`, `cp312`, `cp313`):
+     1. `py3-none-manylinux_2_17_x86_64.whl` (`linux-amd64`)
+     2. `py3-none-manylinux_2_17_aarch64.whl` (`linux-arm64`)
+     3. `py3-none-macosx_11_0_arm64.whl` (`osx-arm64` Apple Silicon)
+     4. `py3-none-macosx_10_9_x86_64.whl` (`osx-amd64` Intel)
+     5. `py3-none-win_amd64.whl` (`windows-amd64`)
+
+### B. How the Release Pipeline Works (`git tag vX.Y.Z`)
+
+When you push a release tag (`vX.Y.Z`), a GitHub Actions workflow runs four stages:
+
+1. **Stage 1 — Build Universal Pure-Python Wheels (1 runner, ~15s)**:
+   * Runs `hatch build -t wheel` on `ubuntu-latest` for `manylint` and the pure-Python `manylint_*` packages, producing `*-py3-none-any.whl`.
+2. **Stage 2 — Build Native Binary Wheels (5-runner OS/arch matrix, or `zig c++` cross-compile)**:
+   * Runs `hatch build -t wheel` across GitHub Actions' 5 native runners (`ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-14`, `macos-13`, `windows-latest`) for `manylint_uncrustify` and `manylint_cppcheck`, producing the 5 `*-py3-none-<platform>.whl` wheels.
+   * *(Optimization: Because `uncrustify` and `cppcheck` rarely change, these binary wheels only need to be rebuilt when their upstream C++ version or wrapper changes.)*
+3. **Stage 3 — Build Standalone Static Executables (`PyApp` across 5 OS/arch runners)**:
+   * On each of the 5 OS/arch matrix runners, downloads the newly built `manylint` wheel + all pinned dependency `.whl` files for that platform and compiles `PyApp` (`PYAPP_DISTRIBUTION_EMBED=true`, `PYAPP_PROJECT_EMBED_WHEELS=true`), producing:
+     * `manylint-linux-amd64`
+     * `manylint-linux-arm64`
+     * `manylint-osx-arm64`
+     * `manylint-osx-amd64`
+     * `manylint-windows-amd64.exe`
+4. **Stage 4 — Publish to PyPI and GitHub Releases**:
+   * Uploads all `.whl` files to **PyPI** (so `pipx install manylint`, `uvx manylint`, and `pre-commit` work immediately on all 5 platforms).
+   * Uploads the 5 standalone `manylint-<os>-<arch>` static binaries, `SHA256SUMS`, and `install.sh` to **GitHub Releases** (so `curl -fsSL .../install.sh | bash` works on bare machines without Python).
+

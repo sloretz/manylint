@@ -1,6 +1,0 @@
-#!/tmp/manylint-venv/bin/python
-import sys
-from ros_code_standard_xmllint.cli import xmllint_cli
-
-if __name__ == "__main__":
-    sys.exit(xmllint_cli())

@@ -22,7 +22,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import yaml
 
@@ -60,9 +59,8 @@ def _match_hook_files(hook: dict, files: list[Path], target_root: Path) -> list[
         if excl_pat and excl_pat.search(rel):
             continue
 
-        if 'python' in types:
-            if fp.suffix != '.py':
-                continue
+        if 'python' in types and fp.suffix != '.py':
+            continue
         if file_pat and not file_pat.search(rel):
             continue
 
@@ -70,13 +68,12 @@ def _match_hook_files(hook: dict, files: list[Path], target_root: Path) -> list[
     return matched
 
 
-def _build_env(junit_dir: Path) -> dict[str, str]:
+def _build_env() -> dict[str, str]:
     env = os.environ.copy()
     venv_bin = str(Path(sys.prefix) / 'bin')
     current_path = env.get('PATH', '')
     if venv_bin not in current_path.split(os.pathsep):
         env['PATH'] = f'{venv_bin}{os.pathsep}{current_path}' if current_path else venv_bin
-    env['MANYLINT_JUNIT_DIR'] = str(junit_dir)
     env.setdefault('PRE_COMMIT_HOME', '/tmp/manylint-pre-commit-cache')
     return env
 
@@ -84,7 +81,6 @@ def _build_env(junit_dir: Path) -> dict[str, str]:
 def _run_target_hooks(
     target: LintTarget,
     target_files: list[Path],
-    junit_dir: Path,
     selected_linters: set[str] | None,
     use_pre_commit_cli: bool,
 ) -> tuple[str, Path, list[HookResult], dict[str, list[Path]]]:
@@ -94,7 +90,7 @@ def _run_target_hooks(
 
     results: list[HookResult] = []
     modified_by_hook: dict[str, list[Path]] = {}
-    env = _build_env(junit_dir)
+    env = _build_env()
     pre_commit_bin = shutil.which('pre-commit', path=env['PATH'])
 
     for repo_entry in cfg.get('repos', []):
@@ -159,19 +155,19 @@ def _run_target_hooks(
 
             rc = proc.returncode
             if modified_files and rc == 0:
-                # Formatters that modified files in-place always signal divergence (exit code 1)
                 rc = 1
 
-            xunit_candidate = junit_dir / f'{hook_id}.xunit.xml'
             results.append(
                 HookResult(
                     target_name=target.name,
+                    target_root=target.root,
                     hook_id=hook_id,
                     returncode=rc,
                     duration=duration,
                     stdout=proc.stdout,
                     stderr=proc.stderr,
-                    xunit_file=xunit_candidate if xunit_candidate.is_file() else None,
+                    matched_files=matched_files,
+                    modified_files=modified_files,
                 )
             )
 
@@ -311,67 +307,60 @@ def main(argv: list[str] | None = None) -> int:
 
     targets = discover_targets(args.paths)
 
-    with tempfile.TemporaryDirectory(prefix='manylint_junit_') as temp_root_str:
-        temp_root = Path(temp_root_str)
-        junit_dir_by_target: dict[str, Path] = {}
-        files_by_target: dict[str, list[Path]] = {}
-
-        for idx, target in enumerate(targets):
-            # Ensure unique key if two targets share a basename
-            if target.name in junit_dir_by_target:
-                target.name = f'{target.name}_{idx}'
-            t_dir = temp_root / target.name
-            t_dir.mkdir(parents=True, exist_ok=True)
-            junit_dir_by_target[target.name] = t_dir
-            files_by_target[target.name] = collect_target_files(
-                target,
-                exclude_patterns=exclude_patterns,
-                git_diff_ref=args.git_diff,
-                git_staged=args.git_staged,
-            )
-
-        results_by_target: dict[str, list[HookResult]] = {}
-        config_by_target: dict[str, Path] = {}
-        modified_by_target: dict[str, dict[str, list[Path]]] = {}
-
-        max_workers = max(1, min(args.jobs, len(targets) or 1))
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = [
-                pool.submit(
-                    _run_target_hooks,
-                    target,
-                    files_by_target[target.name],
-                    junit_dir_by_target[target.name],
-                    selected_linters,
-                    args.use_pre_commit,
-                )
-                for target in targets
-            ]
-            for fut in futures:
-                tname, cfg_path, hook_results, mod_map = fut.result()
-                config_by_target[tname] = cfg_path
-                results_by_target[tname] = hook_results
-                modified_by_target[tname] = mod_map
-
-        if args.junit_file is not None:
-            args.junit_file.parent.mkdir(parents=True, exist_ok=True)
-            xml_str = build_aggregated_junit_xml(results_by_target, junit_dir_by_target)
-            args.junit_file.write_text(xml_str, encoding='utf-8')
-
-        if args.junit_dir is not None:
-            export_junit_directory(args.junit_dir, results_by_target, junit_dir_by_target)
-
-        if args.output == 'junit':
-            sys.stdout.write(build_aggregated_junit_xml(results_by_target, junit_dir_by_target))
-        else:
-            _print_text_report(targets, config_by_target, results_by_target, modified_by_target)
-
-        any_failed = any(
-            res.returncode != 0
-            for hook_list in results_by_target.values()
-            for res in hook_list
+    seen_names: set[str] = set()
+    files_by_target: dict[str, list[Path]] = {}
+    for idx, target in enumerate(targets):
+        if target.name in seen_names:
+            target.name = f'{target.name}_{idx}'
+        seen_names.add(target.name)
+        files_by_target[target.name] = collect_target_files(
+            target,
+            exclude_patterns=exclude_patterns,
+            git_diff_ref=args.git_diff,
+            git_staged=args.git_staged,
         )
-        return 1 if any_failed else 0
+
+    results_by_target: dict[str, list[HookResult]] = {}
+    config_by_target: dict[str, Path] = {}
+    modified_by_target: dict[str, dict[str, list[Path]]] = {}
+
+    max_workers = max(1, min(args.jobs, len(targets) or 1))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [
+            pool.submit(
+                _run_target_hooks,
+                target,
+                files_by_target[target.name],
+                selected_linters,
+                args.use_pre_commit,
+            )
+            for target in targets
+        ]
+        for fut in futures:
+            tname, cfg_path, hook_results, mod_map = fut.result()
+            config_by_target[tname] = cfg_path
+            results_by_target[tname] = hook_results
+            modified_by_target[tname] = mod_map
+
+    if args.junit_file is not None:
+        args.junit_file.parent.mkdir(parents=True, exist_ok=True)
+        xml_str = build_aggregated_junit_xml(results_by_target)
+        args.junit_file.write_text(xml_str, encoding='utf-8')
+
+    if args.junit_dir is not None:
+        export_junit_directory(args.junit_dir, results_by_target)
+
+    if args.output == 'junit':
+        sys.stdout.write(build_aggregated_junit_xml(results_by_target))
+    else:
+        _print_text_report(targets, config_by_target, results_by_target, modified_by_target)
+
+    any_failed = any(
+        res.returncode != 0
+        for hook_list in results_by_target.values()
+        for res in hook_list
+    )
+    return 1 if any_failed else 0
 
 
 if __name__ == '__main__':

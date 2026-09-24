@@ -5,9 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "ros-code-standard-cpplint"
 version = "0.1.0"
-description = "ROS 2 cpplint code standard linter"
+description = "Pinned cpplint with ROS 2 C/C++ style rules"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "cpplint==2.0.0",
+]
 
 [project.scripts]
 ros-code-standard-cpplint = "ros_code_standard_cpplint.cli:main"

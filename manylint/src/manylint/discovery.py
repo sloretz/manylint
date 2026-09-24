@@ -194,3 +194,28 @@ def collect_target_files(
         filtered.append(fp)
 
     return filtered
+
+
+def expand_files(paths: list[str], extensions: tuple[str, ...] | set[str]) -> list[str]:
+    """Expand file or directory arguments into file paths matching extensions (skipping AMENT_IGNORE)."""
+    ext_set = {e if e.startswith('.') else f'.{e}' for e in extensions}
+    result: list[str] = []
+    for raw in paths or ['.']:
+        p = Path(raw)
+        if p.is_file():
+            result.append(str(p))
+        elif p.is_dir():
+            for dirpath, dirnames, filenames in os.walk(p, topdown=True):
+                curr = Path(dirpath)
+                if _has_ignore_marker(curr):
+                    dirnames[:] = []
+                    continue
+                dirnames[:] = sorted(
+                    d for d in dirnames if d not in SKIP_DIRS and not d.startswith(('.', '_'))
+                )
+                for fn in sorted(filenames):
+                    fp = curr / fn
+                    if fp.suffix in ext_set or fn in ext_set:
+                        result.append(str(fp))
+    return result
+

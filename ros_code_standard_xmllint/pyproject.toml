@@ -5,15 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "ros-code-standard-xmllint"
 version = "0.1.0"
-description = "Self-contained ROS 2 XML linter and schema validator with bundled ROS XSD schemas"
+description = "Offline ROS 2 XML and package.xml schema validator"
 requires-python = ">=3.10"
 dependencies = [
-  "lxml",
+    "lxml>=5.0.0",
 ]
 
 [project.scripts]
 ros-code-standard-xmllint = "ros_code_standard_xmllint.cli:main"
-xmllint = "ros_code_standard_xmllint.cli:xmllint_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ros_code_standard_xmllint"]

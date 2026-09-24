@@ -1,3 +1,4 @@
-from .cli import get_executable, main, run
+from .cli import get_executable, main
 
-__all__ = ["get_executable", "main", "run"]
+run = main
+__all__ = ['get_executable', 'main', 'run']

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-pep257"
+version = "0.1.0"
+description = "Check Python docstrings using ROS 2 PEP 257 conventions."
+requires-python = ">=3.10"
+dependencies = [
+  "pydocstyle",
+]
+
+[project.scripts]
+ros-code-standard-pep257 = "ros_code_standard_pep257.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_pep257"]
+dev-mode-dirs = ["src"]

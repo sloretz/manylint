@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "manylint"
+version = "0.1.0"
+description = "Standalone multi-repo pre-commit runner and ROS 2 linter suite"
+requires-python = ">=3.10"
+dependencies = [
+  "pre-commit",
+  "pyyaml",
+  "ros-code-standard-uncrustify",
+  "ros-code-standard-cppcheck",
+  "ros-code-standard-xmllint",
+  "ros-code-standard-cpplint",
+  "ros-code-standard-lint-cmake",
+  "ros-code-standard-copyright",
+  "ros-code-standard-flake8",
+  "ros-code-standard-pep257",
+]
+
+[project.scripts]
+manylint = "manylint.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/manylint"]
+dev-mode-dirs = ["src"]

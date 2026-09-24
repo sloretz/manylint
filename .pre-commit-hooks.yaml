@@ -1,0 +1,55 @@
+- id: uncrustify
+  name: ros-code-standard-uncrustify
+  description: Check and auto-format C/C++ code using ROS 2 uncrustify rules
+  entry: ros-code-standard-uncrustify
+  language: system
+  files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+- id: cppcheck
+  name: ros-code-standard-cppcheck
+  description: Static analysis for C/C++ code using ROS 2 cppcheck rules
+  entry: ros-code-standard-cppcheck
+  language: system
+  files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+- id: cpplint
+  name: ros-code-standard-cpplint
+  description: Check C/C++ code against ROS 2 Google C++ style conventions
+  entry: ros-code-standard-cpplint
+  language: system
+  files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+- id: xmllint
+  name: ros-code-standard-xmllint
+  description: Validate XML files against XSD/RelaxNG/Schematron schemas and format XML
+  entry: ros-code-standard-xmllint
+  language: system
+  files: \.xml$
+
+- id: lint_cmake
+  name: ros-code-standard-lint-cmake
+  description: Check CMake files against ROS 2 style conventions
+  entry: ros-code-standard-lint-cmake
+  language: system
+  files: (^|/)CMakeLists\.txt$|\.cmake(\.in)?$
+
+- id: copyright
+  name: ros-code-standard-copyright
+  description: Check source files for copyright and license headers
+  entry: ros-code-standard-copyright
+  language: system
+  files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx|cmake|py)$
+
+- id: flake8
+  name: ros-code-standard-flake8
+  description: Check Python code syntax and style conventions using ROS 2 flake8 rules
+  entry: ros-code-standard-flake8
+  language: system
+  files: \.py$
+
+- id: pep257
+  name: ros-code-standard-pep257
+  description: Check Python docstrings against ROS 2 PEP 257 conventions
+  entry: ros-code-standard-pep257
+  language: system
+  files: \.py$

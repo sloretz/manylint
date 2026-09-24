@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-cppcheck"
+version = "0.1.0"
+description = "Bundled static cppcheck binary and ROS 2 code standard runner"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ros-code-standard-cppcheck = "ros_code_standard_cppcheck.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_cppcheck"]
+dev-mode-dirs = ["src"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"

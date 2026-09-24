@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+ros_code_standard_uncrustify/src/ros_code_standard_uncrustify/bin/uncrustify
+ros_code_standard_cppcheck/src/ros_code_standard_cppcheck/bin/cppcheck

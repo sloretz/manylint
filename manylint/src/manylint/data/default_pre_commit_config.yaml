@@ -1,0 +1,62 @@
+# Default pre-commit configuration bundled with manylint.
+# Uses local system hooks so that manylint executes the installed
+# ros-code-standard-* entry points directly from its Python environment
+# without cloning external repositories or creating per-hook virtualenvs.
+repos:
+  - repo: local
+    hooks:
+      - id: uncrustify
+        name: uncrustify
+        description: Format C/C++ files with ROS 2 ament code style
+        entry: ros-code-standard-uncrustify
+        language: system
+        files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+      - id: cpplint
+        name: cpplint
+        description: Check C/C++ files against ROS 2 cpplint rules
+        entry: ros-code-standard-cpplint
+        language: system
+        files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+      - id: cppcheck
+        name: cppcheck
+        description: Run static C/C++ analysis with ROS 2 cppcheck configuration
+        entry: ros-code-standard-cppcheck
+        language: system
+        files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx)$
+
+      - id: flake8
+        name: flake8
+        description: Check Python files with ROS 2 flake8 configuration and plugins
+        entry: ros-code-standard-flake8
+        language: system
+        types: [python]
+
+      - id: pep257
+        name: pep257
+        description: Check Python docstrings with ROS 2 pep257 conventions
+        entry: ros-code-standard-pep257
+        language: system
+        types: [python]
+
+      - id: xmllint
+        name: xmllint
+        description: Validate XML and package.xml files against XSD/RNG/Schematron schemas
+        entry: ros-code-standard-xmllint
+        language: system
+        files: \.(xml|launch|sdf|urdf|xacro)$
+
+      - id: lint_cmake
+        name: lint_cmake
+        description: Check CMakeLists.txt and .cmake files with ROS 2 lint_cmake rules
+        entry: ros-code-standard-lint-cmake
+        language: system
+        files: (^|/)CMakeLists\.txt$|\.cmake$
+
+      - id: copyright
+        name: copyright
+        description: Check source files for copyright and license headers
+        entry: ros-code-standard-copyright
+        language: system
+        files: \.(c|cc|cpp|cxx|h|hh|hpp|hxx|py|cmake)$|(^|/)CMakeLists\.txt$

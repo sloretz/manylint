@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-flake8"
+version = "0.1.0"
+description = "Check Python code style using ROS 2 flake8 conventions."
+requires-python = ">=3.10"
+dependencies = [
+  "flake8",
+  "flake8-blind-except",
+  "flake8-builtins",
+  "flake8-class-newline",
+  "flake8-comprehensions",
+  "flake8-deprecated",
+  "flake8-import-order",
+  "flake8-quotes",
+]
+
+[project.scripts]
+ros-code-standard-flake8 = "ros_code_standard_flake8.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_flake8"]
+dev-mode-dirs = ["src"]

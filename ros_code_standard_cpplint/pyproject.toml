@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-cpplint"
+version = "0.1.0"
+description = "ROS 2 cpplint code standard linter"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ros-code-standard-cpplint = "ros_code_standard_cpplint.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_cpplint"]
+dev-mode-dirs = ["src"]

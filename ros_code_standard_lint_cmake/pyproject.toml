@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-lint-cmake"
+version = "0.1.0"
+description = "ROS 2 CMake code style linter"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ros-code-standard-lint-cmake = "ros_code_standard_lint_cmake.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_lint_cmake"]
+dev-mode-dirs = ["src"]
+

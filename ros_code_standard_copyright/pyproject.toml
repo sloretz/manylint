@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ros-code-standard-copyright"
+version = "0.21.2"
+description = "Check source files for copyright reference."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+ros-code-standard-copyright = "ros_code_standard_copyright.cli:main"
+ament_copyright = "ros_code_standard_copyright.cli:main"
+
+[project.entry-points."ament_copyright.copyright_name"]
+osrf = "ros_code_standard_copyright.copyright_names:osrf"
+
+[project.entry-points."ament_copyright.license"]
+apache2 = "ros_code_standard_copyright.licenses:apache2"
+boost1 = "ros_code_standard_copyright.licenses:boost1"
+bsd_3clause = "ros_code_standard_copyright.licenses:bsd_3clause"
+bsd_2clause = "ros_code_standard_copyright.licenses:bsd_2clause"
+mit = "ros_code_standard_copyright.licenses:mit"
+mit0 = "ros_code_standard_copyright.licenses:mit0"
+gplv3 = "ros_code_standard_copyright.licenses:gplv3"
+lgplv3 = "ros_code_standard_copyright.licenses:lgplv3"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ros_code_standard_copyright"]
+dev-mode-dirs = ["src"]

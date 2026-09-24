@@ -1,101 +1,87 @@
-# `manylint` — Standalone Multi-Linter CLI Specification for ROS 2
+# `manylint` — Standalone Multi-Repo `pre-commit` CLI Specification for ROS 2
 
-`manylint` is a unified command-line interface that discovers ROS 2 packages under given filesystem paths and runs all applicable linters and formatters directly—decoupling code quality checks and auto-formatting from CMake/CTest execution.
+`manylint` is a unified command-line tool that runs `pre-commit` across one or more ROS 2 packages or multi-repository directories (such as `src/`), using pinned linter versions and a built-in default `.pre-commit-config.yaml` when a repository does not provide its own.
+
+Following `pre-commit`'s philosophy, **there is no separate `check` vs. `fix` subcommand**:
+* Linters that support auto-fixing (`uncrustify`, `clang-format`, `xmllint`) **automatically fix files in-place** and report a failure (exit code `1` + diff) on the pass where files were modified.
+* Linters that only check (`cppcheck`, `cpplint`, `flake8`, `pep257`, `lint_cmake`, `copyright`) **check and report violations** (exit code `1`).
+* Both locally and in CI, you run the exact same command: `manylint [paths ...]`.
 
 ---
 
 ## 1. Synopsis
 
 ```text
-manylint <subcommand> [options] [paths ...]
+manylint [options] [paths ...]
 ```
-
-### Subcommands
-* **`manylint check [paths ...]`**: Run linters in read-only verification mode across one or more ROS packages or directories.
-* **`manylint fix [paths ...]`**: Run auto-formatters and fixers in-place on all supported linters, then check for any remaining unfixable issues.
-* **`manylint list [paths ...]`**: List discovered ROS 2 packages under `paths` and the linters that will be executed for each package.
 
 *(If `[paths ...]` is omitted, `manylint` defaults to `.`, the current working directory.)*
 
 ---
 
-## 2. Path-Based Target Selection & Workflows
+## 2. Core Workflows
 
-Targets are selected purely by filesystem path (`[paths ...]`), optionally filtered by Git working tree state (`--git-diff` or `--git-staged`).
-
-### A. Single Package (`path/to/pkg`)
-When given a path containing a `package.xml` (or a subdirectory/file inside a package):
+### A. Single Repository or Package (`path/to/pkg`)
 ```bash
-# Check all applicable linters on a single ROS package
-manylint check src/ros2/rclcpp/rclcpp
-
-# Auto-fix all fixable issues (uncrustify/clang-format, copyright, xmllint, etc.)
-manylint fix src/ros2/rclcpp/rclcpp
+# Run all applicable linters (auto-fixing where supported) on a single package or repo
+manylint src/ros2/rclcpp/rclcpp
 ```
 
-### B. Multi-Package Directory (`path/to/folder`)
-When given a directory containing multiple ROS packages in its subdirectories, `manylint` recursively discovers every ROS package under that folder (skipping directories containing `AMENT_IGNORE` or `COLCON_IGNORE`):
+### B. Multi-Repository Workspace (`path/to/folder`)
+When given a workspace directory containing multiple Git repositories or ROS packages in its subdirectories, `manylint` discovers every repository/package under that folder (skipping directories containing `AMENT_IGNORE` or `COLCON_IGNORE`):
 ```bash
-# Check every ROS package under src/
-manylint check src/
-
-# Fix all fixable issues across every ROS package under src/
-manylint fix src/
+# Run across every Git repository / ROS package under src/
+manylint src/
 ```
 
-### C. Behavior of `manylint fix`
-When `manylint fix` runs on a package:
-1. **Formatters / Fixers run in-place**:
-   * **C/C++ style**: `uncrustify` (or `clang_format`) reformats `.c/.cpp/.h/.hpp` files.
-   * **XML formatting**: `xmllint --format` normalizes XML indentation.
-   * **Copyright headers**: `copyright` updates copyright years or inserts missing headers.
-   * **Python style**: `autopep8` / `ruff` fixes PEP 8 formatting and unused imports.
-2. **Post-fix status & exit code**:
-   * Reports which files were modified and any remaining unfixable violations from check-only linters (e.g., `cppcheck`, `cpplint`, `flake8`, `pep257`, `lint_cmake`).
+### C. What Happens on Execution (Local vs. CI)
+1. **Local Development**:
+   * Running `manylint src/` automatically formats C/C++ (`uncrustify --reformat`) and XML (`xmllint --format`) files in-place, and reports any remaining check errors (`flake8`, `cppcheck`, `cpplint`, `pep257`, `lint_cmake`, `copyright`).
+   * If any file was modified or had a violation, `manylint` exits `1`. Running `manylint src/` a second time after auto-formatting exits `0` once all issues are resolved.
+2. **Continuous Integration (CI)**:
+   * Running `manylint --output=junit src/` runs the exact same hooks.
+   * If any file was modified by an auto-formatter (meaning uncommitted formatting divergences existed) or failed a check-only linter, `manylint` records the failure and unified diff in the JUnit XML report and exits `1`.
 
 ---
 
 ## 3. CLI Options
 
-### A. Linter Selection
-* **`-l, --linters <linter,linter,...>`**: Run only the specified comma-separated linters (e.g., `manylint check --linters uncrustify,cpplint src/`). If omitted, all applicable default linters for each package are run.
+### A. Linter / Hook Selection
+* **`-l, --linters <hook_id,hook_id,...>`**: Run only the specified comma-separated `pre-commit` hook IDs (e.g., `manylint --linters uncrustify,cpplint src/`). If omitted, all hooks in `.pre-commit-config.yaml` (or the built-in default config) are run.
 
 ### B. Git Incremental Filtering
-* **`--git-diff [REF]`**: Only check or fix files modified relative to `REF` (defaults to `HEAD` if `REF` is omitted) within the given `paths`.
-* **`--git-staged`**: Only check or fix files currently staged in the Git index (`git diff --cached`), ideal for pre-commit hooks.
+* **`--git-diff [REF]`**: Only run on files modified relative to `REF` (defaults to `HEAD` if `REF` is omitted) within the given `paths` (passes `--from-ref <REF> --to-ref HEAD` to `pre-commit`).
+* **`--git-staged`**: Only run on files currently staged in the Git index (default `pre-commit` staged behavior, ideal for git pre-commit hooks).
 
 ### C. Output Formats (`--output=text` | `--output=junit`)
 * **`--output {text,junit}`**:
-  * `text` *(default)*: Human-readable output grouped by ROS package and linter, showing file/line diagnostics, unified diffs, and a summary count.
-  * `junit`: JUnit/XUnit XML report representing results across all checked ROS packages and linters.
+  * `text` *(default)*: Human-readable output grouped by repository/package and hook, showing diagnostics, unified diffs (`--show-diff-on-failure`), and a summary count.
+  * `junit`: JUnit/XUnit XML report representing results across all checked repositories/packages and hooks.
 * **`--junit-file <path>`**: Write the aggregated JUnit XML output to `<path>` (instead of `stdout`).
-* **`--junit-dir <dir>`**: Write per-package XUnit XML files into `<dir>/<pkg_name>/<linter>.xunit.xml` (compatible with `colcon test-result`).
+* **`--junit-dir <dir>`**: Write per-package/per-repo XUnit XML files into `<dir>/<name>/<hook_id>.xunit.xml` (compatible with `colcon test-result`).
 
-### D. General Execution & Filtering Options
-* **`--exclude <glob ...>`**: Exclude files or directories matching the given glob patterns.
-* **`-j, --jobs <N>`**: Number of parallel worker processes (defaults to `0` = number of CPU cores).
+### D. General Options
+* **`--exclude <regex>`**: Additional file/directory regex exclusion pattern.
+* **`-j, --jobs <N>`**: Number of repositories to process in parallel (defaults to `0` = number of CPU cores).
 
 ---
 
-## 4. Handling `--output=junit` Across Multiple ROS Packages
+## 4. Handling `--output=junit` Across Multiple Repositories / Packages
 
-When running `manylint check` across multiple packages (`manylint check src/ --output=junit`), `manylint` supports two ways to consume JUnit XML:
-
-### Mode 1: Aggregated Multi-Package JUnit XML (`--output=junit` or `--junit-file=<path>`)
+### Mode 1: Aggregated Multi-Repo JUnit XML (`--output=junit` or `--junit-file=<path>`)
 Outputs a single JUnit XML document (to `stdout` by default, or to `<path>` when `--junit-file` is passed):
-* The root `<testsuites>` element aggregates statistics (`tests`, `failures`, `errors`, `time`) across all checked ROS packages.
-* Each `(package, linter)` pair is emitted as a `<testsuite name="<pkg_name>.<linter>" package="<pkg_name>">`.
-* Each checked file is emitted as a `<testcase classname="<pkg_name>.<linter>" name="<relative_file_path>">`.
+* The root `<testsuites>` element aggregates statistics (`tests`, `failures`, `errors`, `time`) across all targets.
+* Each `(target, hook_id)` pair is emitted as a `<testsuite name="<target>.<hook_id>" package="<target>">`.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuites name="manylint" tests="142" failures="2" errors="0" time="3.41">
+<testsuites name="manylint" tests="142" failures="1" errors="0" time="3.41">
   <testsuite name="rclcpp.uncrustify" package="rclcpp" tests="45" failures="1" time="1.12">
     <testcase classname="rclcpp.uncrustify" name="src/rclcpp/node.cpp" time="0.02">
-      <failure message="Code style divergence in src/rclcpp/node.cpp">
+      <failure message="Code style divergence (file modified by uncrustify)">
 <![CDATA[
 --- src/rclcpp/node.cpp
-+++ src/rclcpp/node.cpp.uncrustify
++++ src/rclcpp/node.cpp
 @@ -42,1 +42,1 @@
 -void foo( int x ){
 +void foo(int x) {
@@ -106,60 +92,42 @@ Outputs a single JUnit XML document (to `stdout` by default, or to `<path>` when
   <testsuite name="rclcpp.xmllint" package="rclcpp" tests="1" failures="0" time="0.05">
     <testcase classname="rclcpp.xmllint" name="package.xml" time="0.05"/>
   </testsuite>
-  <testsuite name="rclpy.flake8" package="rclpy" tests="28" failures="1" time="0.84">
-    <!-- ... -->
-  </testsuite>
 </testsuites>
 ```
 
 ### Mode 2: Per-Package JUnit Directory (`--output=junit --junit-dir=<dir>`)
-Writes separate XUnit files per package and linter using Ament's standard directory structure (`<dir>/<pkg_name>/<linter>.xunit.xml`), allowing `colcon test-result` to summarize results across all packages:
-```text
-<junit-dir>/
-├── rclcpp/
-│   ├── copyright.xunit.xml
-│   ├── cppcheck.xunit.xml
-│   ├── cpplint.xunit.xml
-│   ├── lint_cmake.xunit.xml
-│   ├── uncrustify.xunit.xml
-│   └── xmllint.xunit.xml
-└── rclpy/
-    ├── copyright.xunit.xml
-    ├── flake8.xunit.xml
-    ├── pep257.xunit.xml
-    └── xmllint.xunit.xml
-```
+Writes separate XUnit files per target and hook (`<dir>/<target>/<hook_id>.xunit.xml`), allowing `colcon test-result` to summarize results across a workspace.
 
 ---
 
 ## 5. Example CLI Invocations
 
 ```bash
-# 1. Check a single ROS package
-manylint check src/ros2/rclcpp/rclcpp
+# 1. Lint and auto-fix a single ROS package
+manylint src/ros2/rclcpp/rclcpp
 
-# 2. Check all ROS packages under src/
-manylint check src/
+# 2. Lint and auto-fix all repositories/packages under src/
+manylint src/
 
 # 3. Run only uncrustify and cpplint on src/ros2/rclcpp
-manylint check --linters uncrustify,cpplint src/ros2/rclcpp
+manylint --linters uncrustify,cpplint src/ros2/rclcpp
 
-# 4. Fix all fixable issues in files changed since origin/rolling
-manylint fix --git-diff origin/rolling src/
+# 4. Run on files changed since origin/rolling
+manylint --git-diff origin/rolling src/
 
-# 5. Fix staged files in a git pre-commit hook
-manylint fix --git-staged
+# 5. Run on staged files in the current repository
+manylint --git-staged
 
 # 6. Run in CI and emit JUnit XML
-manylint check --output=junit --junit-file=build/manylint_results.xml src/
+manylint --output=junit --junit-file=build/manylint_results.xml src/
 ```
 
 ---
 
 ## 6. Exit Codes
 
-| Exit Code | Meaning in `manylint check` | Meaning in `manylint fix` |
-| :---: | :--- | :--- |
-| `0` | All linters passed with zero violations | All violations were fixed (or none existed) |
-| `1` | One or more linter violations were found | Unfixable linter violations remain after fixing |
-| `2` | Invalid CLI arguments or runtime error | Invalid CLI arguments or runtime error |
+| Exit Code | Meaning |
+| :---: | :--- |
+| `0` | All hooks passed with zero violations and no files needed modification |
+| `1` | One or more hooks found violations or modified files in-place |
+| `2` | Invalid CLI arguments or runtime error |

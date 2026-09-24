@@ -1,8 +1,8 @@
 # Customizing `manylint` via `.pre-commit-config.yaml`
 
-Instead of inventing a custom `<export><manylint>` XML schema inside `package.xml`, **`manylint` uses `.pre-commit-config.yaml` as its native customization format**:
+`manylint` uses standard `.pre-commit-config.yaml` files as its customization mechanism:
 
-1. **If no `.pre-commit-config.yaml` is present** in a repository (or package directory):
+1. **If no `.pre-commit-config.yaml` is present** in a repository:
    * `manylint` automatically uses its **built-in default configuration** (`default_pre_commit_config.yaml`), running the standard ROS 2 / Ament linters (`copyright`, `cppcheck`, `cpplint`, `flake8`, `lint_cmake`, `pep257`, `uncrustify`, `xmllint`) with ROS 2's canonical style configs.
    * **Zero configuration files are required** in standard ROS 2 repositories.
 2. **If a `.pre-commit-config.yaml` is present**:
@@ -10,28 +10,25 @@ Instead of inventing a custom `<export><manylint>` XML schema inside `package.xm
 
 ---
 
-## 1. What `.pre-commit-config.yaml` Controls
+## 1. How Linters Behave (Auto-Fix vs. Check-Only)
 
-Every customization need is handled natively by `.pre-commit-config.yaml` syntax:
-
-* **Which linters run**: Listed under `hooks:` (`- id: uncrustify`, `- id: flake8`, etc.). To disable a default linter, simply omit it from `hooks:`. To enable an optional linter (like `clang-format`, `clang-tidy`, `mypy`, or `codespell`), add its `- id:`.
-* **Global file exclusions**: Top-level `exclude: <regex>` at the root of `.pre-commit-config.yaml`.
-* **Per-linter file filtering**: Hook-level `exclude: <regex>` or `files: <regex>`.
-* **Custom linter config files & CLI arguments**: Hook-level `args: [...]` pointing to the linter's native config file (e.g., `args: ["-c", "custom_uncrustify.cfg"]` or `args: ["--config=.flake8"]`).
+Following `pre-commit`'s standard model, hooks do not need separate `check` and `fix` configurations:
+* **Auto-fixing hooks (`uncrustify`, `clang-format`, `xmllint`, `ruff`)**: Always format files in-place (`--reformat` / `-i` / `--format`) and exit `1` when files are modified. Locally, this fixes formatting automatically; in CI (`manylint --output=junit`), any modified file fails the check and reports the diff.
+* **Check-only hooks (`cppcheck`, `cpplint`, `flake8`, `pep257`, `lint_cmake`, `copyright`, `mypy`)**: Check files and exit `1` when violations are found (unless auto-fix flags like `--add-missing` are passed in `args:`).
 
 ---
 
 ## 2. Example `.pre-commit-config.yaml`
 
 ```yaml
-# Global regex of files/directories to exclude across all linters
+# Global regex of files/directories to exclude across all hooks
 exclude: ^(src/third_party/|include/generated/)
 
 repos:
   - repo: https://github.com/sloretz/manylint
     rev: v0.2.0
     hooks:
-      # 1. Copyright checker / fixer
+      # 1. Copyright checker (or auto-add missing headers with args)
       - id: copyright
         args: ["--add-missing", "Open Source Robotics Foundation, Inc.", "apache2"]
 
@@ -58,7 +55,7 @@ repos:
       - id: clang-format
         args: ["--config=.clang-format"]
 
-      # 8. XML schema & formatting linter
+      # 8. XML schema validator & auto-formatter
       - id: xmllint
 ```
 
@@ -66,17 +63,17 @@ repos:
 
 ## 3. Built-In Hook IDs Provided by `manylint`
 
-| Hook `id` | Default? | Supports `manylint fix`? | Native Config / `args` Example |
-| :--- | :---: | :---: | :--- |
-| **`copyright`** | Yes | **Yes** | `args: ["--add-missing", "<HOLDER>", "apache2"]` |
-| **`cppcheck`** | Yes | No (Check only) | `args: ["-I", "include", "--language=c++"]` |
-| **`cpplint`** | Yes | No (Check only) | Reads `CPPLINT.cfg` or `args: ["--linelength=120"]` |
-| **`flake8`** | Yes | No (Check only) | `args: ["--config=.flake8"]` |
-| **`lint_cmake`** | Yes | No (Check only) | `args: ["--linelength=140"]` |
-| **`pep257`** | Yes | No (Check only) | `args: ["--convention=google"]` |
-| **`uncrustify`** | Yes | **Yes** | `args: ["-c", "uncrustify.cfg"]` |
-| **`xmllint`** | Yes | **Yes** | Validates `<?xml-model?>` XSDs & formats XML |
-| **`clang-format`** | No | **Yes** | `args: ["--config=.clang-format"]` |
-| **`clang-tidy`** | No | **Yes** | `args: ["--config=.clang-tidy"]` |
-| **`mypy`** | No | No (Check only) | `args: ["--config=mypy.ini"]` |
-| **`ruff`** | No | **Yes** | `args: ["--config=ruff.toml"]` |
+| Hook `id` | In Default Config? | Behavior When Invoked | Native Config / `args` Example |
+| :--- | :---: | :--- | :--- |
+| **`uncrustify`** | Yes | **Auto-formats C/C++ in-place** (`--reformat`) | `args: ["-c", "uncrustify.cfg"]` |
+| **`xmllint`** | Yes | **Validates XSD schemas & formats XML in-place** | `args: ["--extensions", "xml", "launch"]` |
+| **`copyright`** | Yes | Checks headers (or adds missing if `--add-missing` in `args`) | `args: ["--add-missing", "<HOLDER>", "apache2"]` |
+| **`cppcheck`** | Yes | Static analysis check | `args: ["-I", "include", "--language=c++"]` |
+| **`cpplint`** | Yes | Google C++ style check | Reads `CPPLINT.cfg` or `args: ["--linelength=120"]` |
+| **`flake8`** | Yes | Python PEP 8 & syntax check | `args: ["--config=.flake8"]` |
+| **`lint_cmake`** | Yes | CMake style check | `args: ["--linelength=140"]` |
+| **`pep257`** | Yes | Python docstring check | `args: ["--convention=google"]` |
+| **`clang-format`** | No | **Auto-formats C/C++ in-place** (`--reformat`) | `args: ["--config=.clang-format"]` |
+| **`clang-tidy`** | No | Static analysis & `--fix-errors` | `args: ["--config=.clang-tidy"]` |
+| **`mypy`** | No | Python static type check | `args: ["--config=mypy.ini"]` |
+| **`ruff`** | No | **Auto-fixes Python imports/style in-place** (`--fix`) | `args: ["--config=ruff.toml"]` |

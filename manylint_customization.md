@@ -1,125 +1,82 @@
-# Customizing `manylint` per Package via `package.xml` (`<export><manylint>`)
+# Customizing `manylint` via `.pre-commit-config.yaml`
 
-`manylint` reads per-package configuration from `<export><manylint>` in `package.xml`.
-To keep configuration simple and avoid reinventing linter settings in XML, **`manylint` delegates rule customization to each linter's native configuration file format** whenever possible, using a minimal, uniform set of XML tags.
+Instead of inventing a custom `<export><manylint>` XML schema inside `package.xml`, **`manylint` uses `.pre-commit-config.yaml` as its native customization format**:
+
+1. **If no `.pre-commit-config.yaml` is present** in a repository (or package directory):
+   * `manylint` automatically uses its **built-in default configuration** (`default_pre_commit_config.yaml`), running the standard ROS 2 / Ament linters (`copyright`, `cppcheck`, `cpplint`, `flake8`, `lint_cmake`, `pep257`, `uncrustify`, `xmllint`) with ROS 2's canonical style configs.
+   * **Zero configuration files are required** in standard ROS 2 repositories.
+2. **If a `.pre-commit-config.yaml` is present**:
+   * `manylint` uses that `.pre-commit-config.yaml` to determine which linters/hooks run, which files are excluded, and what custom config files or CLI arguments are passed.
 
 ---
 
-## 1. Uniform XML Schema
+## 1. What `.pre-commit-config.yaml` Controls
 
-Every linter tag inside `<export><manylint>` shares the same minimal structure:
-* **`enabled="true|false"`** *(attribute)*: Enable or disable the linter for this package.
-* **`<config>path/to/file</config>`**: Path to the linter's native config file (relative to `package.xml`).
-* **`<exclude>glob/pattern</exclude>`**: File or directory glob to exclude (can be specified at the `<manylint>` level for all linters, or inside a specific `<linter>` tag).
-* **`<args>...</args>`**: Raw command-line arguments (parsed with `shlex.split()`) passed directly to the linter for tools that do not use a config file or need extra CLI flags.
+Every customization need is handled natively by `.pre-commit-config.yaml` syntax:
 
-```xml
-<export>
-  <build_type>ament_cmake</build_type>
-  <manylint default_linters="true">
-    <!-- Package-wide file exclusions across all linters -->
-    <exclude>src/third_party/**</exclude>
+* **Which linters run**: Listed under `hooks:` (`- id: uncrustify`, `- id: flake8`, etc.). To disable a default linter, simply omit it from `hooks:`. To enable an optional linter (like `clang-format`, `clang-tidy`, `mypy`, or `codespell`), add its `- id:`.
+* **Global file exclusions**: Top-level `exclude: <regex>` at the root of `.pre-commit-config.yaml`.
+* **Per-linter file filtering**: Hook-level `exclude: <regex>` or `files: <regex>`.
+* **Custom linter config files & CLI arguments**: Hook-level `args: [...]` pointing to the linter's native config file (e.g., `args: ["-c", "custom_uncrustify.cfg"]` or `args: ["--config=.flake8"]`).
 
-    <!-- Disable a default linter -->
-    <uncrustify enabled="false"/>
+---
 
-    <!-- Enable an optional linter and point to its native .clang-format file -->
-    <clang_format>
-      <config>.clang-format</config>
-    </clang_format>
+## 2. Example `.pre-commit-config.yaml`
 
-    <!-- Pass CLI flags to a linter without a config file -->
-    <cppcheck>
-      <exclude>test/benchmark_*.cpp</exclude>
-      <args>-I include --language=c++</args>
-    </cppcheck>
-  </manylint>
-</export>
+```yaml
+# Global regex of files/directories to exclude across all linters
+exclude: ^(src/third_party/|include/generated/)
+
+repos:
+  - repo: https://github.com/sloretz/manylint
+    rev: v0.2.0
+    hooks:
+      # 1. Copyright checker / fixer
+      - id: copyright
+        args: ["--add-missing", "Open Source Robotics Foundation, Inc.", "apache2"]
+
+      # 2. Cppcheck static analysis with custom include directory
+      - id: cppcheck
+        exclude: ^test/benchmark_
+        args: ["-I", "include", "--language=c++"]
+
+      # 3. Cpplint with custom line length
+      - id: cpplint
+        args: ["--linelength=120"]
+
+      # 4. Flake8 with custom .flake8 config file
+      - id: flake8
+        args: ["--config=.flake8"]
+
+      # 5. CMake linter
+      - id: lint_cmake
+
+      # 6. PEP 257 docstring linter
+      - id: pep257
+
+      # 7. Replaced default uncrustify with clang-format using repo's .clang-format
+      - id: clang-format
+        args: ["--config=.clang-format"]
+
+      # 8. XML schema & formatting linter
+      - id: xmllint
 ```
 
-* If `default_linters="false"` is set on `<manylint>`, **only** the linters explicitly listed inside `<manylint>` are run.
-* If `default_linters="true"` (the default), the standard `ament_lint_common` linters run unless disabled with `enabled="false"`.
-
 ---
 
-## 2. XML Tags Reference for Each Linter
+## 3. Built-In Hook IDs Provided by `manylint`
 
-### A. Linters Configured via Native Config Files (`<config>`)
-
-| XML Tag | Native Config File Format (`<config>`) | Example `<export><manylint>` Entry |
-| :--- | :--- | :--- |
-| **`<uncrustify>`** | Uncrustify `.cfg` file | `<uncrustify><config>uncrustify.cfg</config></uncrustify>` |
-| **`<clang_format>`** | `.clang-format` YAML file | `<clang_format><config>.clang-format</config></clang_format>` |
-| **`<clang_tidy>`** | `.clang-tidy` YAML file | `<clang_tidy><config>.clang-tidy</config></clang_tidy>` |
-| **`<flake8>`** | INI file (`[flake8]` in `.flake8` or `setup.cfg`) | `<flake8><config>.flake8</config></flake8>` |
-| **`<pep257>`** | INI file (`[pydocstyle]` in `.pydocstyle` or `setup.cfg`) | `<pep257><config>.pydocstyle</config></pep257>` |
-| **`<pycodestyle>`** | INI file (`[pycodestyle]` in `setup.cfg` or `.pycodestyle`) | `<pycodestyle><config>setup.cfg</config></pycodestyle>` |
-| **`<mypy>`** | `mypy.ini`, `.mypy.ini`, or `pyproject.toml` | `<mypy><config>mypy.ini</config></mypy>` |
-| **`<lint_cmake>`** | `.cmakelintrc` file | `<lint_cmake><config>.cmakelintrc</config></lint_cmake>` |
-| **`<pclint>`** | PC-lint `.lnt` file | `<pclint><config>config/custom.lnt</config></pclint>` |
-
-*(Note: `cpplint` also automatically reads `CPPLINT.cfg` files placed in the package directory or subdirectories.)*
-
-### B. Linters Configured via `<exclude>` and `<args>`
-
-For linters that do not use a standalone config file (or when passing simple CLI flags is easier than creating a file):
-
-* **`<cpplint>`** (uses `CPPLINT.cfg` if present in directory, or `<args>`):
-  ```xml
-  <cpplint>
-    <exclude>include/generated/**</exclude>
-    <args>--linelength=120 --filter=-whitespace/braces,-readability/todo</args>
-  </cpplint>
-  ```
-* **`<cppcheck>`**:
-  ```xml
-  <cppcheck>
-    <exclude>src/experimental/**</exclude>
-    <args>-I include --language=c++ --suppress=knownConditionTrueFalse</args>
-  </cppcheck>
-  ```
-* **`<copyright>`**:
-  ```xml
-  <copyright>
-    <exclude>src/external/**</exclude>
-    <args>--add-missing "Open Source Robotics Foundation, Inc." apache2</args>
-  </copyright>
-  ```
-* **`<xmllint>`** (schemas are already declared inside each XML file via `<?xml-model?>`):
-  ```xml
-  <xmllint>
-    <exclude>test/malformed_fixtures/*.xml</exclude>
-    <args>--extensions xml launch urdf xacro</args>
-  </xmllint>
-  ```
-* **`<pyflakes>`**:
-  ```xml
-  <pyflakes>
-    <exclude>test/legacy_*.py</exclude>
-  </pyflakes>
-  ```
-
----
-
-## 3. How Custom Arguments Are Parsed
-
-1. **Path Resolution**:
-   * Relative paths in `<config>` and `<exclude>` are resolved relative to the package directory containing `package.xml`.
-2. **`<config>` Forwarding**:
-   * Passed directly to the linter's native config flag (`-c <path>` for `uncrustify`, `--config <path>` for `flake8`, `pep257`, `pycodestyle`, `mypy`, `lint_cmake`, `clang_format`, `clang_tidy`, and `--pclint-config-file <path>` for `pclint`).
-3. **`<args>` Tokenization**:
-   * The text inside `<args>...</args>` is split using POSIX shell rules via Python's `shlex.split()` (so quoted strings like `"Open Source Robotics Foundation, Inc."` remain a single argument) and appended to the linter command.
-
----
-
-## 4. Warning on Unsupported Linters
-
-When `manylint` parses `<export><manylint>`, it checks every child XML tag against the list of supported linters (`clang_format`, `clang_tidy`, `copyright`, `cppcheck`, `cpplint`, `flake8`, `lint_cmake`, `mypy`, `pclint`, `pep257`, `pycodestyle`, `pyflakes`, `uncrustify`, `xmllint`) and `<exclude>`.
-
-If a package specifies an unknown or unsupported linter tag (e.g., `<rustfmt/>` or a typo like `<uncrustfiy/>`):
-1. **Prints a warning to `stderr`** with the package name, `package.xml` path and line number, the unknown tag name, and a typo suggestion if applicable:
-   ```text
-   WARNING [manylint]: my_pkg (src/my_pkg/package.xml:24): Unsupported linter '<rustfmt>' in <export><manylint>; skipping.
-   WARNING [manylint]: my_pkg (src/my_pkg/package.xml:25): Unsupported linter '<uncrustfiy>' in <export><manylint>; skipping. Did you mean '<uncrustify>'?
-   ```
-2. **Skips the unknown tag and continues running** all valid linters for the package so a single unrecognized tag does not break linting across the workspace.
+| Hook `id` | Default? | Supports `manylint fix`? | Native Config / `args` Example |
+| :--- | :---: | :---: | :--- |
+| **`copyright`** | Yes | **Yes** | `args: ["--add-missing", "<HOLDER>", "apache2"]` |
+| **`cppcheck`** | Yes | No (Check only) | `args: ["-I", "include", "--language=c++"]` |
+| **`cpplint`** | Yes | No (Check only) | Reads `CPPLINT.cfg` or `args: ["--linelength=120"]` |
+| **`flake8`** | Yes | No (Check only) | `args: ["--config=.flake8"]` |
+| **`lint_cmake`** | Yes | No (Check only) | `args: ["--linelength=140"]` |
+| **`pep257`** | Yes | No (Check only) | `args: ["--convention=google"]` |
+| **`uncrustify`** | Yes | **Yes** | `args: ["-c", "uncrustify.cfg"]` |
+| **`xmllint`** | Yes | **Yes** | Validates `<?xml-model?>` XSDs & formats XML |
+| **`clang-format`** | No | **Yes** | `args: ["--config=.clang-format"]` |
+| **`clang-tidy`** | No | **Yes** | `args: ["--config=.clang-tidy"]` |
+| **`mypy`** | No | No (Check only) | `args: ["--config=mypy.ini"]` |
+| **`ruff`** | No | **Yes** | `args: ["--config=ruff.toml"]` |

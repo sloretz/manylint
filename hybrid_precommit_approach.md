@@ -1,171 +1,131 @@
-# The Hybrid Architecture: `manylint` as a Pinned PyPI Package + Static Binary Wrapper + `pre-commit` Hook
+# The Hybrid Architecture: `manylint` as a Pinned `pre-commit` Distribution & Multi-Repo CLI
 
-By combining **PyPI binary wheels**, a **strictly version-pinned `manylint` Python package**, and a **self-contained static binary wrapper**, we can get 100% cross-platform hermeticity without writing a custom multi-language Bazel build from scratch—while supporting `manylint` CLI users, `pip`/`uvx` users, and `pre-commit` users from the exact same codebase.
+Instead of inventing a custom XML configuration schema (`<export><manylint>`) or building a custom C++ linter runner from scratch, `manylint` splits cleanly into two parts:
+1. **`manylint` the Python Library & Hook Provider**: Pins exact `==` versions of all ROS 2 linters (`uncrustify-wheel`, `cppcheck-wheel`, `lxml`, `flake8` + 7 plugins, `pydocstyle`, `clang-format`) and provides built-in `pre-commit` hooks + a built-in default `.pre-commit-config.yaml`.
+2. **`manylint` the CLI Tool**: Discovers repositories/packages under a path (e.g. `manylint check src/` or `manylint fix src/`), uses each repo's `.pre-commit-config.yaml` if one exists (or `manylint`'s built-in default `.pre-commit-config.yaml` if none exists), handles the `check` vs. `fix` distinction, and formats results across all repos as `--output=text` or `--output=junit`.
 
 ---
 
-## 1. What PyPI Packages Do We Actually Need to Create?
+## 1. What Information `.pre-commit-config.yaml` Already Contains (Replacing `<export><manylint>`)
 
-If we audit all the linters in `ament_lint`, almost all of them **already** publish prebuilt platform wheels (`manylinux`, `macosx`, `win_amd64`) or pure-Python wheels on PyPI.
+Everything we previously considered putting into `<export><manylint>` inside `package.xml` is **already first-class syntax in `.pre-commit-config.yaml`**:
 
-### A. Already on PyPI (Zero Packaging Work Needed)
-
-| Linter / Component | Existing PyPI Package(s) | Wheel Type on PyPI |
+| Customization Need | Previous `<export><manylint>` Idea | Native `.pre-commit-config.yaml` Syntax |
 | :--- | :--- | :--- |
-| **`xmllint` (`libxml2`)** | **`lxml`** | Prebuilt binary wheels (`manylinux`, `macosx`, `win_amd64`) with `libxml2` & `libxslt` statically compiled inside |
-| **`clang_format`** | **`clang-format`** | Prebuilt binary wheels (`manylinux`, `macosx`, `win_amd64`) published via `scikit-build` |
-| **`clang_tidy`** | **`clang-tidy`** | Prebuilt binary wheels (`manylinux`, `macosx`, `win_amd64`) |
-| **`flake8` + 7 Plugins** | `flake8`, `pycodestyle`, `pyflakes`, `mccabe`, `flake8-blind-except`, `flake8-builtins`, `flake8-class-newline`, `flake8-comprehensions`, `flake8-deprecated`, `flake8-import-order`, `flake8-quotes` | Pure-Python (`py3-none-any.whl`) |
-| **`pep257`** | `pydocstyle`, `snowballstemmer` | Pure-Python (`py3-none-any.whl`) |
-| **`mypy`** | `mypy` | Prebuilt `mypyc` binary wheels (`manylinux`, `macosx`, `win_amd64`) |
-| **`ruff`** *(optional Python fixer)* | `ruff` | Prebuilt Rust binary wheels (`manylinux`, `macosx`, `win_amd64`) |
+| **Choose which linters run** | `<uncrustify enabled="false"/>` | Omit `id: uncrustify` from `hooks:` (or add `id: clang-format`) |
+| **Global file exclusions** | `<exclude>src/third_party/**</exclude>` | Top-level `exclude: ^src/third_party/` |
+| **Per-linter file exclusions** | `<cppcheck><exclude>test/**</exclude></cppcheck>` | Hook-level `exclude: ^test/` or `files: ^src/` |
+| **Custom linter config file** | `<uncrustify><config>my.cfg</config></uncrustify>` | Hook-level `args: ["-c", "my.cfg"]` |
+| **Custom CLI arguments** | `<cppcheck><args>-I include</args></cppcheck>` | Hook-level `args: ["-I", "include"]` |
 
-### B. Only 3 New PyPI Packages Needed
-
-To make the entire ROS 2 linter suite installable from PyPI with zero system dependencies, we only need to create **two binary wheel packages** and **the `manylint` package itself**:
-
-1. **`uncrustify-wheel` (Binary Wheel via `scikit-build-core` + `cibuildwheel`)**:
-   * Compiles `uncrustify` (pinned to e.g. `0.78.1`) from C++17 source in GitHub Actions and places the static `uncrustify` binary into `<wheel>/bin/uncrustify` (and exposes `uncrustify_wheel.get_executable()`).
-   * Built once per uncrustify release for `manylinux_2_17_x86_64`, `manylinux_2_17_aarch64`, `macosx_11_0_arm64`, `macosx_10_9_x86_64`, and `win_amd64`.
-2. **`cppcheck-wheel` (Binary Wheel via `scikit-build-core` + `cibuildwheel`)**:
-   * Compiles `cppcheck` (pinned to e.g. `2.14.0` with its bundled `simplecpp`, `tinyxml2`, and `picojson`) into `<wheel>/bin/cppcheck` for the same 5 OS/arch targets.
-3. **`manylint` (Pure-Python Package `manylint-X.Y.Z-py3-none-any.whl`)**:
-   * Contains the `manylint` CLI (`manylint check`, `manylint fix`, `manylint list`, `<export><manylint>` parser, `--output=junit` reporter).
-   * Vendors/includes the pure-Python `ament_lint` modules (`cpplint.py`, `cmakelint.py`, `ament_copyright`, and the runners) plus ROS 2's canonical config files (`ament_code_style_0_78.cfg`, `ament_flake8.ini`, `.clang-format`, and `package_format2/3.xsd`).
-   * Uses `lxml.etree.XMLSchema` (from the `lxml` wheel) + the bundled `package_format2/3.xsd` files to run `xmllint` validation and formatting in-process without needing `/usr/bin/xmllint` or internet access.
-
----
-
-## 2. Exact Version Pinning (`==`) for Identical Cross-Platform Behavior
-
-To guarantee that `manylint==0.2.0` produces the **exact same lint results on Ubuntu 22.04, Ubuntu 24.04, macOS, and Windows**, `manylint`'s `pyproject.toml` pins every underlying linter and plugin with strict equality (`==`):
-
-```toml
-[project]
-name = "manylint"
-version = "0.2.0"
-requires-python = ">=3.10"
-dependencies = [
-  # Prebuilt native C/C++/Rust binary wheels:
-  "uncrustify-wheel == 0.78.1",
-  "cppcheck-wheel == 2.14.0",
-  "clang-format == 18.1.8",
-  "lxml == 5.3.0",
-  "ruff == 0.6.8",
-
-  # Exact pinned Python linters & Flake8 plugins:
-  "flake8 == 7.1.1",
-  "pycodestyle == 2.12.1",
-  "pyflakes == 3.2.0",
-  "mccabe == 0.7.0",
-  "flake8-blind-except == 0.2.1",
-  "flake8-builtins == 2.5.0",
-  "flake8-class-newline == 1.6.0",
-  "flake8-comprehensions == 3.15.0",
-  "flake8-deprecated == 2.2.1",
-  "flake8-import-order == 0.18.2",
-  "flake8-quotes == 3.4.0",
-  "pydocstyle == 6.3.0",
-  "snowballstemmer == 2.2.0",
-]
-
-[project.scripts]
-manylint = "manylint.cli:main"
-```
-
-Because every dependency resolves to a deterministic wheel containing the exact same C++ binaries (`uncrustify 0.78.1`, `cppcheck 2.14.0`, `libxml2` inside `lxml 5.3.0`) and Python bytecode, OS package differences (`apt` / `brew`) are completely bypassed.
-
----
-
-## 3. Dual Distribution: PyPI Library + Standalone Static Binary Wrapper
-
-How can we offer **both** a standard PyPI package (`pip install manylint`) **and** a single zero-dependency static binary (`manylint-linux-amd64`, `manylint-linux-arm64`, `manylint-osx-arm64`, `manylint-osx-amd64`, `manylint-windows-amd64.exe`) without maintaining two different codebases?
-
-### How the Static Wrapper Binary Works (`PyApp` / `PyOxidizer` / `scie`)
-
-Tools like **[`PyApp`](https://ofek.dev/pyapp/)** (a static Rust binary wrapper used by official Python packaging tools like `Hatch`) or **`scie-pants` (`ptex`)** are designed specifically for this pattern:
-
-```mermaid
-flowchart LR
-  subgraph BuildTime["GitHub Actions Release Pipeline"]
-    W["manylint==0.2.0.whl +<br/>Pinned Dependency .whl Files<br/>(uncrustify-wheel, cppcheck-wheel, lxml, flake8...)"]
-    P["python-build-standalone<br/>(Hermetic Python 3.12 Runtime)"]
-    R["PyApp Static Rust Wrapper"]
-    W --> R
-    P --> R
-    R --> B["manylint-linux-amd64<br/>(Single Static Executable)"]
-  end
-
-  subgraph RunTime["User Machine (Zero System Dependencies)"]
-    B -->|"1st run (~300ms): unpacks offline payload"| C["~/.cache/manylint/0.2.0/"]
-    B -->|"Subsequent runs (<2ms): execv()"| C
-  end
-```
-
-1. **At Build Time (in GitHub Actions)**:
-   * We run `pip download --only-binary=:all: manylint==0.2.0 -d dist/wheels/` for the target platform (`linux_x86_64`, `linux_aarch64`, `macosx_11_0_arm64`, `win_amd64`).
-   * We compile **[`PyApp`](https://ofek.dev/pyapp/)** (`cargo build --release`) with:
-     * `PYAPP_PROJECT_NAME=manylint`
-     * `PYAPP_PROJECT_VERSION=0.2.0`
-     * `PYAPP_DISTRIBUTION_EMBED=true` (embeds the `indygreg/python-build-standalone` Python 3.12 runtime directly into the Rust binary)
-     * `PYAPP_PROJECT_EMBED_WHEELS=true` (embeds `manylint` and all its pinned `.whl` files—including `uncrustify-wheel`, `cppcheck-wheel`, `lxml`, and `flake8`—directly into the Rust binary)
-2. **At Runtime (on the User's Machine)**:
-   * The user downloads `manylint-linux-amd64` via `curl ... | bash` onto a bare container or laptop (even one with **no Python, no `pip`, and no `apt` packages installed**).
-   * **First run**: `manylint-linux-amd64` extracts its embedded Python runtime and embedded `.whl` files into `~/.cache/manylint/0.2.0/` (100% offline, no internet access required) and executes `manylint`.
-   * **Every subsequent run**: The Rust binary checks that `~/.cache/manylint/0.2.0/` exists and immediately `execv`s `~/.cache/manylint/0.2.0/bin/manylint` in `< 2ms`.
-
----
-
-## 4. One Codebase, Three Ways to Install and Use `manylint`
-
-With this hybrid architecture, **100% of `manylint` is maintained in a single Python repository**, yet every type of user gets their preferred workflow:
-
-### Workflow 1: Zero-Dependency Static Binary (`curl ... | bash`)
-For developers, Docker containers, or CI machines that just want a single static executable on `PATH` with zero setup:
-```bash
-curl -fsSL https://github.com/sloretz/manylint/releases/latest/download/install.sh | bash
-manylint check src/
-manylint fix src/
-```
-
-### Workflow 2: Python Ecosystem (`pipx` / `uvx` / `pip`)
-For developers who already use `uv`, `pipx`, or a Python virtual environment:
-```bash
-# Run ephemerally without installing globally:
-uvx manylint check src/
-
-# Or install into an isolated venv:
-pipx install manylint
-```
-
-### Workflow 3: Native `pre-commit` / `prek` Hook
-Because `manylint` is a valid Python package on PyPI (`language: python`), the `manylint` repository simply includes a `.pre-commit-hooks.yaml`:
+### Example `.pre-commit-config.yaml` for a Customized Repository
+If a repository wants to customize which linters run or pass custom config files/arguments, it simply drops a standard `.pre-commit-config.yaml` in its root:
 
 ```yaml
-# .pre-commit-hooks.yaml
-- id: manylint-fix
-  name: manylint (fix)
-  description: Run ROS 2 / Ament auto-formatters and linters
-  entry: manylint fix
-  language: python
-  types: [file]
-  require_serial: true
+# Optional .pre-commit-config.yaml (only needed if customizing defaults!)
+exclude: ^(src/third_party/|include/generated/)
 
-- id: manylint-check
-  name: manylint (check)
-  description: Check ROS 2 / Ament linters without modifying files
-  entry: manylint check
-  language: python
-  types: [file]
-  require_serial: true
-```
-
-Any repository that already uses `pre-commit` (or `prek`) can add a 5-line block to `.pre-commit-config.yaml`:
-```yaml
 repos:
   - repo: https://github.com/sloretz/manylint
     rev: v0.2.0
     hooks:
-      - id: manylint-fix
+      - id: copyright
+        args: ["--add-missing", "Open Source Robotics Foundation, Inc.", "apache2"]
+      - id: cppcheck
+        exclude: ^test/benchmark_
+        args: ["-I", "include", "--language=c++"]
+      - id: cpplint
+        args: ["--linelength=120"]
+      - id: flake8
+        args: ["--config=.flake8"]
+      - id: lint_cmake
+      - id: pep257
+      - id: uncrustify
+        args: ["-c", "custom_uncrustify.cfg"]
+      - id: xmllint
+      # Can also mix in any standard third-party pre-commit hooks!
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.3.0
+    hooks:
+      - id: codespell
 ```
-When `pre-commit` runs, it automatically creates a virtualenv from the `manylint` PyPI package and its pinned binary wheels (`uncrustify-wheel`, `cppcheck-wheel`, `lxml`, `flake8`, etc.)—giving `pre-commit` users the exact same hermetic binaries, `package.xml` (`<export><manylint>`) awareness, and zero-system-dependency guarantee as the standalone static binary!
+
+### Why Replacing `<export><manylint>` with `.pre-commit-config.yaml` Is a Huge Win
+1. **Zero Config Required by Default**: If a repository has **no** `.pre-commit-config.yaml`, `manylint` automatically uses its embedded default `.pre-commit-config.yaml` (running `copyright`, `cppcheck`, `cpplint`, `flake8`, `lint_cmake`, `pep257`, `uncrustify`, and `xmllint` with ROS 2's standard configs).
+2. **No Custom XML Schema to Learn**: When customization *is* needed, developers write a standard `.pre-commit-config.yaml` with full IDE autocomplete, and can even include non-ROS hooks like `codespell` or `check-yaml`.
+3. **Works with Both `manylint` and Standard `pre-commit`**: A repository with `.pre-commit-config.yaml` works with `manylint check`, `manylint fix`, `pre-commit run`, and `pre-commit.ci`.
+
+---
+
+## 2. How `manylint` Works Under the Hood
+
+### Part A: `manylint` the Python Library (`pyproject.toml`)
+The `manylint` package on PyPI pins the exact versions of `pre-commit` and all underlying linters so every platform (`linux-amd64`, `linux-arm64`, `osx-arm64`, `osx-amd64`, `windows-amd64`) runs the exact same binaries and Python bytecode:
+
+* **2 New Binary Wheel Packages on PyPI** (built via `scikit-build-core` + `cibuildwheel`):
+  1. `uncrustify-wheel == 0.78.1`
+  2. `cppcheck-wheel == 2.14.0`
+* **Existing Prebuilt Binary / Pure-Python Wheels on PyPI**:
+  * `pre-commit == 4.0.1`
+  * `lxml == 5.3.0` (powers `xmllint` XSD validation & `--format` in-process via statically linked `libxml2`)
+  * `clang-format == 18.1.8`
+  * `flake8 == 7.1.1` + the 7 `flake8-*` plugins (`blind-except`, `builtins`, `class-newline`, `comprehensions`, `deprecated`, `import-order`, `quotes`)
+  * `pydocstyle == 6.3.0`
+* **Bundled Assets Inside `manylint`**:
+  * `manylint/default_pre_commit_config.yaml` (the built-in fallback `.pre-commit-config.yaml`)
+  * `ament_code_style_0_78.cfg`, `ament_flake8.ini`, `.clang-format`, `package_format2.xsd`, `package_format3.xsd`, `cpplint.py`, `cmakelint.py`, and `ament_copyright`.
+
+---
+
+### Part B: `manylint` the Multi-Repo CLI Orchestrator
+
+When a user runs `manylint check src/` or `manylint fix src/`:
+
+```mermaid
+flowchart TD
+  CLI["manylint check src/  OR  manylint fix src/"] --> Discover["1. Discover Target Directories / Git Repos under paths<br/>(skipping AMENT_IGNORE / COLCON_IGNORE)"]
+  Discover --> CheckCfg{"Does repo have<br/>.pre-commit-config.yaml?"}
+  CheckCfg -->|"Yes"| UseRepoCfg["Use repo's .pre-commit-config.yaml"]
+  CheckCfg -->|"No"| UseDefaultCfg["Use manylint's embedded<br/>default_pre_commit_config.yaml"]
+  UseRepoCfg --> Exec["2. Run hooks with MANYLINT_MODE={check|fix}<br/>and MANYLINT_JUNIT_DIR=<temp_dir>"]
+  UseDefaultCfg --> Exec
+  Exec --> Report["3. Aggregate results across all repos & hooks<br/>Output as --output=text or --output=junit"]
+```
+
+#### 1. Multi-Repo & Multi-Package Discovery
+* `manylint` walks the target path(s) (e.g., `src/`):
+  * It identifies every Git repository (or standalone ROS package directory if outside Git), automatically pruning any directory containing `AMENT_IGNORE` or `COLCON_IGNORE`.
+  * For each discovered target:
+    * If `<target>/.pre-commit-config.yaml` exists, `manylint` runs `pre-commit` with `-c <target>/.pre-commit-config.yaml`.
+    * If no `.pre-commit-config.yaml` exists, `manylint` runs `pre-commit` with `-c <manylint_pkg>/default_pre_commit_config.yaml`.
+
+#### 2. How `manylint check` vs. `manylint fix` Works with `.pre-commit-config.yaml`
+How does a single `.pre-commit-config.yaml` support both read-only checking (`manylint check`) and in-place fixing (`manylint fix`)?
+1. **For `manylint`'s Built-In Hooks (`uncrustify`, `clang_format`, `xmllint`, `copyright`)**:
+   * The `manylint` CLI sets the environment variable `MANYLINT_MODE=check` or `MANYLINT_MODE=fix` before invoking `pre-commit`.
+   * When `MANYLINT_MODE=check`: `uncrustify`, `clang_format`, `xmllint`, and `copyright` run in **read-only diff/check mode** (printing unified diffs and writing `<hook>.xunit.xml` without modifying files).
+   * When `MANYLINT_MODE=fix`: They run with `--reformat` / `--format` / `--add-missing`, modifying files in-place on disk!
+2. **For Third-Party Hooks in a Custom `.pre-commit-config.yaml` (e.g., `codespell --write-changes` or `end-of-file-fixer`)**:
+   * During `manylint fix`: Any files modified by third-party hooks are kept on disk.
+   * During `manylint check`: If a third-party hook modifies files in the working tree, `manylint` captures the resulting `git diff`, records the diff as a violation in the text/JUnit report, and restores the original file contents so `manylint check` remains **strictly non-destructive**.
+
+#### 3. How `--output=text` and `--output=junit` Work Across Multiple Repositories
+* `manylint` passes `MANYLINT_JUNIT_DIR=<temp_dir>/<repo_or_pkg_name>` to each hook execution.
+* Built-in hooks emit detailed per-file XUnit XML (`<testcase classname="<pkg>.<linter>" name="<file>">`), while any third-party `pre-commit` hooks have their `stdout`/`stderr` and exit code wrapped into a `<testsuite name="<repo>.<hook_id>">` automatically.
+* Finally, `manylint` formats the combined results across all repositories as either:
+  * **`--output=text`**: Clean terminal output grouped by repository/package and hook, with a summary table at the end.
+  * **`--output=junit`**: Either a single aggregated `<testsuites name="manylint">` XML document (`--junit-file`) or a `colcon test-result`-compatible directory tree (`--junit-dir`).
+
+---
+
+## 3. Dual Installation: PyPI Library + Static Binary Wrapper
+
+Because `manylint` is a pure-Python package whose dependencies are all prebuilt wheels (`uncrustify-wheel`, `cppcheck-wheel`, `lxml`, `flake8`, `pre-commit`), we can distribute it in **two ways from the same build pipeline**:
+
+1. **On PyPI (`pip install manylint` / `uvx manylint`)**:
+   * Installs the `manylint` Python library and CLI along with all `==`-pinned linter wheels.
+   * Also allows `repo: https://github.com/sloretz/manylint` to be used directly in `.pre-commit-config.yaml`.
+2. **As a Standalone Static Binary (`manylint-linux-amd64`, `manylint-linux-arm64`, `manylint-osx-arm64`, `manylint-windows-amd64.exe`)**:
+   * Built in GitHub Actions using **[`PyApp`](https://ofek.dev/pyapp/)** (`PYAPP_DISTRIBUTION_EMBED=true`, `PYAPP_PROJECT_EMBED_WHEELS=true`), which embeds `python-build-standalone` + the `manylint` wheel + all pinned linter wheels directly inside a static Rust executable.
+   * Installed via `curl -fsSL https://.../install.sh | bash` into `~/.local/bin/manylint`.
+   * Even when using `manylint`'s built-in hooks in `.pre-commit-config.yaml`, `manylint` uses `language: system` (pointing to its own embedded virtualenv in `~/.cache/manylint/<version>/bin`), so **`pre-commit` never even needs to download or build a virtualenv over the network!**
